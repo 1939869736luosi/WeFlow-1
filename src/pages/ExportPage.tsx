@@ -1163,7 +1163,7 @@ function ExportPage() {
         label: contentTypeLabels[item.type],
         stats: [
           { label: '总会话数', value: totalSessions },
-          { label: '已导出会话数', value: exported }
+          { label: '已导出', value: exported }
         ]
       }
     })
@@ -1174,7 +1174,7 @@ function ExportPage() {
       label: '朋友圈',
       stats: [
         { label: '朋友圈条数', value: snsStats.totalPosts },
-        { label: '已导出朋友圈条数', value: snsExportedCount }
+        { label: '已导出', value: snsExportedCount }
       ]
     }
 
