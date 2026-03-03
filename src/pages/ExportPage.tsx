@@ -1941,7 +1941,7 @@ function ExportPage() {
     void loadBaseConfig()
     void ensureSharedTabCountsLoaded()
     void loadSessions()
-    void loadContentSessionCounts({ forceRefresh: true })
+    void loadContentSessionCounts()
 
     // 朋友圈统计延后一点加载，避免与首屏会话初始化抢占。
     const timer = window.setTimeout(() => {
