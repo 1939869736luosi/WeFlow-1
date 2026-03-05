@@ -47,6 +47,7 @@ type TaskStatus = 'queued' | 'running' | 'success' | 'error'
 type TaskScope = 'single' | 'multi' | 'content' | 'sns'
 type ContentType = 'text' | 'voice' | 'image' | 'video' | 'emoji'
 type ContentCardType = ContentType | 'sns'
+type SnsRankMode = 'likes' | 'comments'
 
 type SessionLayout = 'shared' | 'per-session'
 
@@ -1335,6 +1336,7 @@ function ExportPage() {
   const [sessionSnsTimelineHasMore, setSessionSnsTimelineHasMore] = useState(false)
   const [sessionSnsTimelineTotalPosts, setSessionSnsTimelineTotalPosts] = useState<number | null>(null)
   const [sessionSnsTimelineStatsLoading, setSessionSnsTimelineStatsLoading] = useState(false)
+  const [sessionSnsRankMode, setSessionSnsRankMode] = useState<SnsRankMode | null>(null)
 
   const [exportFolder, setExportFolder] = useState('')
   const [writeLayout, setWriteLayout] = useState<configService.ExportWriteLayout>('B')
@@ -2153,6 +2155,7 @@ function ExportPage() {
   const closeSessionSnsTimeline = useCallback(() => {
     sessionSnsTimelineRequestTokenRef.current += 1
     sessionSnsTimelineLoadingRef.current = false
+    setSessionSnsRankMode(null)
     setSessionSnsTimelineTarget(null)
     setSessionSnsTimelinePosts([])
     setSessionSnsTimelineLoading(false)
@@ -2163,6 +2166,7 @@ function ExportPage() {
   }, [])
 
   const openSessionSnsTimelineByTarget = useCallback((target: SessionSnsTimelineTarget) => {
+    setSessionSnsRankMode(null)
     setSessionSnsTimelineTarget(target)
     setSessionSnsTimelinePosts([])
     setSessionSnsTimelineHasMore(false)
@@ -2242,6 +2246,62 @@ function ExportPage() {
     sessionSnsTimelineStatsLoading,
     sessionSnsTimelineTotalPosts
   ])
+
+  const sessionSnsLikeRankings = useMemo(() => {
+    const rankMap = new Map<string, { name: string; count: number; latestTime: number }>()
+    for (const post of sessionSnsTimelinePosts) {
+      const createTime = Number(post?.createTime) || 0
+      const likes = Array.isArray(post?.likes) ? post.likes : []
+      for (const likeNameRaw of likes) {
+        const name = String(likeNameRaw || '').trim() || '未知用户'
+        const current = rankMap.get(name)
+        if (current) {
+          current.count += 1
+          if (createTime > current.latestTime) current.latestTime = createTime
+          continue
+        }
+        rankMap.set(name, { name, count: 1, latestTime: createTime })
+      }
+    }
+    return [...rankMap.values()].sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count
+      if (b.latestTime !== a.latestTime) return b.latestTime - a.latestTime
+      return a.name.localeCompare(b.name, 'zh-CN')
+    })
+  }, [sessionSnsTimelinePosts])
+
+  const sessionSnsCommentRankings = useMemo(() => {
+    const rankMap = new Map<string, { name: string; count: number; latestTime: number }>()
+    for (const post of sessionSnsTimelinePosts) {
+      const createTime = Number(post?.createTime) || 0
+      const comments = Array.isArray(post?.comments) ? post.comments : []
+      for (const comment of comments) {
+        const name = String(comment?.nickname || '').trim() || '未知用户'
+        const current = rankMap.get(name)
+        if (current) {
+          current.count += 1
+          if (createTime > current.latestTime) current.latestTime = createTime
+          continue
+        }
+        rankMap.set(name, { name, count: 1, latestTime: createTime })
+      }
+    }
+    return [...rankMap.values()].sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count
+      if (b.latestTime !== a.latestTime) return b.latestTime - a.latestTime
+      return a.name.localeCompare(b.name, 'zh-CN')
+    })
+  }, [sessionSnsTimelinePosts])
+
+  const toggleSessionSnsRankMode = useCallback((mode: SnsRankMode) => {
+    setSessionSnsRankMode((prev) => (prev === mode ? null : mode))
+  }, [])
+
+  const sessionSnsActiveRankings = useMemo(() => {
+    if (sessionSnsRankMode === 'likes') return sessionSnsLikeRankings
+    if (sessionSnsRankMode === 'comments') return sessionSnsCommentRankings
+    return []
+  }, [sessionSnsCommentRankings, sessionSnsLikeRankings, sessionSnsRankMode])
 
   const mergeSessionContentMetrics = useCallback((input: Record<string, SessionExportMetric | SessionContentMetric | undefined>) => {
     const entries = Object.entries(input)
@@ -6025,9 +6085,51 @@ function ExportPage() {
                       <div className="sns-dialog-stats">{renderSessionSnsTimelineStats()}</div>
                     </div>
                   </div>
-                  <button className="close-btn" type="button" onClick={closeSessionSnsTimeline}>
-                    <X size={16} />
-                  </button>
+                  <div className="sns-dialog-header-actions">
+                    <div className="sns-dialog-rank-switch">
+                      <button
+                        type="button"
+                        className={`sns-dialog-rank-btn ${sessionSnsRankMode === 'likes' ? 'active' : ''}`}
+                        onClick={() => toggleSessionSnsRankMode('likes')}
+                      >
+                        点赞排行
+                      </button>
+                      <button
+                        type="button"
+                        className={`sns-dialog-rank-btn ${sessionSnsRankMode === 'comments' ? 'active' : ''}`}
+                        onClick={() => toggleSessionSnsRankMode('comments')}
+                      >
+                        评论排行
+                      </button>
+                      {sessionSnsRankMode && (
+                        <div
+                          className="sns-dialog-rank-panel"
+                          role="region"
+                          aria-label={sessionSnsRankMode === 'likes' ? '点赞排行' : '评论排行'}
+                        >
+                          {sessionSnsActiveRankings.length === 0 ? (
+                            <div className="sns-dialog-rank-empty">
+                              {sessionSnsRankMode === 'likes' ? '暂无点赞数据' : '暂无评论数据'}
+                            </div>
+                          ) : (
+                            sessionSnsActiveRankings.slice(0, 10).map((item, index) => (
+                              <div className="sns-dialog-rank-row" key={`${sessionSnsRankMode}-${item.name}`}>
+                                <span className="sns-dialog-rank-index">{index + 1}</span>
+                                <span className="sns-dialog-rank-name" title={item.name}>{item.name}</span>
+                                <span className="sns-dialog-rank-count">
+                                  {item.count.toLocaleString('zh-CN')}
+                                  {sessionSnsRankMode === 'likes' ? '次' : '条'}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <button className="close-btn" type="button" onClick={closeSessionSnsTimeline}>
+                      <X size={16} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="sns-dialog-tip">
