@@ -218,6 +218,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getContacts: () => ipcRenderer.invoke('chat:getContacts'),
     getMessage: (sessionId: string, localId: number) =>
       ipcRenderer.invoke('chat:getMessage', sessionId, localId),
+    searchMessages: (keyword: string, sessionId?: string, limit?: number, offset?: number, beginTimestamp?: number, endTimestamp?: number) =>
+      ipcRenderer.invoke('chat:searchMessages', keyword, sessionId, limit, offset, beginTimestamp, endTimestamp),
     onWcdbChange: (callback: (event: any, data: { type: string; json: string }) => void) => {
       ipcRenderer.on('wcdb-change', callback)
       return () => ipcRenderer.removeListener('wcdb-change', callback)

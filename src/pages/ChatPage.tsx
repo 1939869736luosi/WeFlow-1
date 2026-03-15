@@ -564,6 +564,17 @@ function ChatPage(props: ChatPageProps) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteProgress, setDeleteProgress] = useState({ current: 0, total: 0 })
   const [cancelDeleteRequested, setCancelDeleteRequested] = useState(false)
+  // 会话内搜索
+  const [showInSessionSearch, setShowInSessionSearch] = useState(false)
+  const [inSessionQuery, setInSessionQuery] = useState('')
+  const [inSessionResults, setInSessionResults] = useState<any[]>([])
+  const [inSessionSearching, setInSessionSearching] = useState(false)
+  const inSessionSearchRef = useRef<HTMLInputElement>(null)
+  // 全局消息搜索
+  const [showGlobalMsgSearch, setShowGlobalMsgSearch] = useState(false)
+  const [globalMsgQuery, setGlobalMsgQuery] = useState('')
+  const [globalMsgResults, setGlobalMsgResults] = useState<any[]>([])
+  const [globalMsgSearching, setGlobalMsgSearching] = useState(false)
 
   // 自定义删除确认对话框
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -2608,6 +2619,56 @@ function ChatPage(props: ChatPageProps) {
     setSearchKeyword('')
   }
 
+  // 会话内搜索
+  const handleInSessionSearch = useCallback(async (keyword: string) => {
+    setInSessionQuery(keyword)
+    if (!keyword.trim() || !currentSessionId) {
+      setInSessionResults([])
+      return
+    }
+    setInSessionSearching(true)
+    try {
+      const res = await window.electronAPI.chat.searchMessages(keyword.trim(), currentSessionId, 50, 0)
+      setInSessionResults(res?.messages || [])
+    } catch {
+      setInSessionResults([])
+    } finally {
+      setInSessionSearching(false)
+    }
+  }, [currentSessionId])
+
+  const handleToggleInSessionSearch = useCallback(() => {
+    setShowInSessionSearch(v => {
+      if (v) { setInSessionQuery(''); setInSessionResults([]) }
+      else setTimeout(() => inSessionSearchRef.current?.focus(), 50)
+      return !v
+    })
+  }, [])
+
+  // 全局消息搜索
+  const handleGlobalMsgSearch = useCallback(async (keyword: string) => {
+    setGlobalMsgQuery(keyword)
+    if (!keyword.trim()) {
+      setGlobalMsgResults([])
+      return
+    }
+    setGlobalMsgSearching(true)
+    try {
+      const res = await window.electronAPI.chat.searchMessages(keyword.trim(), undefined, 50, 0)
+      setGlobalMsgResults(res?.messages || [])
+    } catch {
+      setGlobalMsgResults([])
+    } finally {
+      setGlobalMsgSearching(false)
+    }
+  }, [])
+
+  const handleCloseGlobalMsgSearch = useCallback(() => {
+    setShowGlobalMsgSearch(false)
+    setGlobalMsgQuery('')
+    setGlobalMsgResults([])
+  }, [])
+
   // 滚动加载更多 + 显示/隐藏回到底部按钮（优化：节流，避免频繁执行）
   const scrollTimeoutRef = useRef<number | null>(null)
   const handleScroll = useCallback(() => {
@@ -3895,20 +3956,57 @@ function ChatPage(props: ChatPageProps) {
                 <input
                   ref={searchInputRef}
                   type="text"
-                  placeholder="搜索"
-                  value={searchKeyword}
-                  onChange={(e) => handleSearch(e.target.value)}
+                  placeholder={showGlobalMsgSearch ? '搜索消息内容...' : '搜索'}
+                  value={showGlobalMsgSearch ? globalMsgQuery : searchKeyword}
+                  onChange={(e) => showGlobalMsgSearch ? handleGlobalMsgSearch(e.target.value) : handleSearch(e.target.value)}
                 />
-                {searchKeyword && (
-                  <button className="close-search" onClick={handleCloseSearch}>
+                {(showGlobalMsgSearch ? globalMsgQuery : searchKeyword) && (
+                  <button className="close-search" onClick={showGlobalMsgSearch ? handleCloseGlobalMsgSearch : handleCloseSearch}>
                     <X size={12} />
                   </button>
                 )}
               </div>
+              <button
+                className={`icon-btn msg-search-toggle-btn ${showGlobalMsgSearch ? 'active' : ''}`}
+                onClick={() => {
+                  if (showGlobalMsgSearch) handleCloseGlobalMsgSearch()
+                  else { setShowGlobalMsgSearch(true); setTimeout(() => searchInputRef.current?.focus(), 50) }
+                }}
+                title={showGlobalMsgSearch ? '退出消息搜索' : '搜索消息内容'}
+              >
+                <MessageSquare size={15} />
+              </button>
               <button className="icon-btn refresh-btn" onClick={handleRefresh} disabled={isLoadingSessions || isRefreshingSessions}>
                 <RefreshCw size={16} className={(isLoadingSessions || isRefreshingSessions) ? 'spin' : ''} />
               </button>
             </div>
+            {/* 全局消息搜索结果面板 */}
+            {showGlobalMsgSearch && (
+              <div className="global-msg-search-results">
+                {globalMsgSearching && (
+                  <div className="global-msg-searching"><Loader2 size={14} className="spin" /> 搜索中...</div>
+                )}
+                {!globalMsgSearching && globalMsgQuery && globalMsgResults.length === 0 && (
+                  <div className="global-msg-empty">没有找到相关消息</div>
+                )}
+                {globalMsgResults.map((msg, i) => (
+                  <div key={i} className="global-msg-result-item" onClick={() => {
+                    const sid = msg._session_id || msg.username
+                    if (sid) {
+                      const target = sessions.find(s => s.username === sid)
+                      if (target) {
+                        handleSelectSession(target)
+                        handleCloseGlobalMsgSearch()
+                      }
+                    }
+                  }}>
+                    <div className="global-msg-result-session">{msg._session_id || msg.username || '未知会话'}</div>
+                    <div className="global-msg-result-content">{(msg.content || msg.strContent || msg.message_content || '').slice(0, 60)}</div>
+                    <div className="global-msg-result-time">{(msg.createTime || msg.create_time) ? new Date((msg.createTime || msg.create_time) * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           {/* 折叠群 header */}
           <div className="session-header-panel folded-header">
@@ -4151,6 +4249,14 @@ function ChatPage(props: ChatPageProps) {
                   document.body
                 )}
                 <button
+                  className={`icon-btn in-session-search-btn ${showInSessionSearch ? 'active' : ''}`}
+                  onClick={handleToggleInSessionSearch}
+                  disabled={!currentSessionId}
+                  title="搜索会话消息"
+                >
+                  <Search size={18} />
+                </button>
+                <button
                   className="icon-btn refresh-messages-btn"
                   onClick={handleRefreshMessages}
                   disabled={isRefreshingMessages || isLoadingMessages}
@@ -4182,6 +4288,40 @@ function ChatPage(props: ChatPageProps) {
               onClose={() => setChatSnsTimelineTarget(null)}
             />
 
+            {/* 会话内搜索栏 */}
+            {showInSessionSearch && (
+              <div className="in-session-search-bar">
+                <Search size={14} className="in-session-search-icon" />
+                <input
+                  ref={inSessionSearchRef}
+                  type="text"
+                  placeholder="搜索消息..."
+                  value={inSessionQuery}
+                  onChange={e => handleInSessionSearch(e.target.value)}
+                  className="in-session-search-input"
+                />
+                {inSessionSearching && <Loader2 size={14} className="spin" />}
+                {inSessionQuery && !inSessionSearching && (
+                  <span className="in-session-result-count">{inSessionResults.length} 条结果</span>
+                )}
+                <button className="icon-btn" onClick={handleToggleInSessionSearch}><X size={14} /></button>
+              </div>
+            )}
+            {showInSessionSearch && inSessionResults.length > 0 && (
+              <div className="in-session-results">
+                {inSessionResults.map((msg, i) => (
+                  <div key={i} className="in-session-result-item" onClick={() => {
+                    // 跳转到消息时间
+                    const ts = msg.createTime || msg.create_time
+                    if (ts) handleJumpDateSelect(new Date(ts * 1000))
+                  }}>
+                    <span className="result-sender">{msg.displayName || msg.talker || msg.username || ''}</span>
+                    <span className="result-content">{(msg.content || msg.strContent || msg.message_content || '').slice(0, 80)}</span>
+                    <span className="result-time">{msg.createTime || msg.create_time ? new Date((msg.createTime || msg.create_time) * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className={`message-content-wrapper ${hasInitialMessages ? 'loaded' : 'loading'} ${isSessionSwitching ? 'switching' : ''}`}>
               {standaloneSessionWindow && standaloneLoadStage !== 'ready' && (
                 <div className="standalone-phase-overlay" role="status" aria-live="polite">
